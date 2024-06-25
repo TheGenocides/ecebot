@@ -32,6 +32,6 @@ async def translate(ctx, *, text = None):
         colour=discord.Color.blurple(),
         timestamp=datetime.datetime.now()
     )
-    await msg.edit(embed=embed)
+    await msg.edit(content="", embed=embed)
 
 bot.run(os.getenv("TOKEN"))
