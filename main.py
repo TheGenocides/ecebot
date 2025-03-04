@@ -66,4 +66,4 @@ async def library(ctx):
 async def borrow(ctx, *, book_name: str):
     ...
 
-bot.run(os.getenv("TOKEN"))
+bot.run(os.environ["TOKEN"])

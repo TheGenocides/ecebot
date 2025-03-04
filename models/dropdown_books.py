@@ -1,5 +1,22 @@
 import discord
 
+book_data = {
+    "Hamlet": {
+        "title": "Hamlet",
+        "description": "A story about prince Hamlet",
+        "author": "William Shakespear",
+        "borrowed": False,
+        "published": 1612
+    },
+    "Romeo and Juliet": {
+        "title": "Romeo and Juliet",
+        "description": "A tragedy ",
+        "author": "William Shakespear",
+        "borrowed": False,
+        "published": 1613
+    }
+}
+
 class BookshelfDropdown(discord.ui.Select):
     def __init__(self, embed: discord.Embed):
         options = [
