@@ -4,6 +4,7 @@ import datetime
 from googletrans import Translator
 from dotenv import load_dotenv
 from discord.ext import commands
+from models import BookshelfDropdownView
 
 # Load the .env file, you need to make a .env file with the TOKEN variable 
 load_dotenv()
@@ -38,5 +39,31 @@ async def translate(ctx, *, text = None):
         timestamp=datetime.datetime.now()
     )
     await msg.edit(content="", embed=embed)
+
+@bot.command(aliases=["lib", "perpustakaan", "perpus"])
+async def library(ctx):
+    em = discord.Embed(
+        title="ENGLISH CLUB BOOKSHELF", 
+        description="""Howdy Guyziee :wave: This is our shared book collections. 
+        You can borrow our books by registering using the command :
+        ```
+        ec!borrow <book_name>
+        ```
+        """,
+        url="http://discord.com",
+        color=discord.Color.blurple()
+        ).add_field(
+            name="Not selected", 
+            value="Please select a book from the dropdown"
+        ).set_author(
+            name="English Club Committee Board",
+            icon_url="attachment://EC.jpeg"   
+        ).set_image(url="attachment://output.png")
+
+    await ctx.send(file=discord.File("images/EC.jpeg"), embed=em, view=BookshelfDropdownView(em))
+
+@bot.command(aliases=["bor", "minjem", "minjam"])
+async def borrow(ctx, *, book_name: str):
+    ...
 
 bot.run(os.getenv("TOKEN"))
