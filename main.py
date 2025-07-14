@@ -5,6 +5,7 @@ import asyncio
 import json
 import random
 import aiohttp
+import sys
 
 from discord.ext import commands
 from googletrans import Translator
@@ -243,7 +244,7 @@ async def borrow(ctx: commands.Context):
 
     file = discord.File(
         build_receipt_image(
-            book, name, receipt_number, renewed_date.strftime("%d/%-m")
+            book, name, receipt_number, renewed_date.strftime("%d/%m" if sys.platform == "win32" else "%d/%-m")
         ),
         "receipt.png",
     )
