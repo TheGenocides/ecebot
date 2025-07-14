@@ -1,5 +1,8 @@
+import json
+
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
+from db import BookDB
 
 @dataclass
 class Identifiers:
@@ -7,16 +10,21 @@ class Identifiers:
     openlibrary: list
 
 class Book:
-    def __init__(self, payload, details, **kwargs: any):
-        self._emoji = kwargs.pop("emoji")
-        self.__payload: dict = payload
-        self.__details = details
+    def __init__(self, payload: BookDB):
+        self.__payload = payload
+        self.__details = json.loads(payload.details)
+        self.__identifiers = json.loads(payload.identifiers)
+        self._publishers = json.loads(payload.publishers)
+        self._authors =  json.loads(payload.authors)
+        self._cover = json.loads(payload.cover)
+
         try:
-            self.__payload.get("identifiers").pop("isbn_10")
+            self.__identifiers.pop("isbn_10")
         except KeyError:
             pass
-        self.__identifiers = self.__payload.get("identifiers")
+
         print(self.__identifiers)
+        
 
     def __repr__(self):
         return self.title
@@ -27,49 +35,45 @@ class Book:
 
     @property
     def url(self):
-        return self.__payload.get("url")
+        return self.__payload.url
     
     @property
     def emoji(self):
-        return self._emoji
+        return self.__payload.emoji
 
     @property
     def publishers(self):
-        l = []
-        for v in (a.items() for a in self.__payload.get("publishers")):
-            for _, publisher in v:
-                l.append(publisher)
-        return l
+        return self._publishers
 
     @property
     def published(self):
-        return self.__payload.get("publish_date")
+        return self.__payload.publish_date
 
     @property
     def published_year(self):
-        date = self.__payload.get("publish_date").split(" ")
+        date = self.published.split(" ")
         return date[2] if len(date) > 1 else date[0]
 
     @property
     def title(self):
-        return self.__payload.get("title")
+        return self.__payload.title
 
     @property
     def description(self):
-        return (
+        description =  (
             self.__details.get(
                 "description", {"value": "*Description is not provided*"}
             )
-        )["value"]
-
+        )
+        return description if isinstance(description, str) else description["value"]
+    
     @property
-    def identifiers(self):
-        return Identifiers(**self.__identifiers)
+    def authors(self):
+        return self._authors
 
     @property
     def main_author(self):
-        authors = self.__payload.get("authors")
-        return authors[0]["name"] if authors else "*Author not provided*"
+        return self.authors[0]["name"] if self.authors else "*Author not provided*"
 
     @property
     def full_title(self):
@@ -77,18 +81,19 @@ class Book:
 
     @property
     def main_author_olid(self):
-        authors = self.__payload.get("authors")
-        return authors[0]["url"].split("/")[4] if authors else "OLID"
+        return self.authors[0]["url"].split("/")[4] if self.authors else "OLID"
+    
+    @property
+    def identifiers(self):
+        return Identifiers(**self.__identifiers)
+    
+    @property
+    def available(self):
+        return self.__payload.available
 
     def get_cover_url(self, size: Literal["small", "medium", "large"]):
-        return self.__payload.get(
-            "cover",
-            {
-                "small": f"https://covers.openlibrary.org/b/olid/{self.identifiers.openlibrary[0]}-S.jpg",
-                "medium": f"https://covers.openlibrary.org/b/olid/{self.identifiers.openlibrary[0]}-M.jpg",
-                "large": f"https://covers.openlibrary.org/b/olid/{self.identifiers.openlibrary[0]}-L.jpg",
-            },
-        )[size]
+        cover = self._cover
+        return cover if isinstance(cover, str) else cover[size]
 
     def get_author_image_url(self, size: Literal["small", "medium", "large"]):
         match size:

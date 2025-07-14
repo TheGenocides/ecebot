@@ -10,6 +10,8 @@ import sys
 from discord.ext import commands
 from googletrans import Translator
 from dotenv import load_dotenv
+from sqlalchemy import select
+from db import AsyncSessionLocal, BookDB
 from models import (
     EMOJIES,
     MESSAGE_SPLASH,
@@ -59,31 +61,66 @@ async def on_ready():
 
     await bot.load_extension("jishaku")
     print("Jishaku loaded!")
-    if not DEBUGING:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                API_URL,
-                headers={
-                    "User-Agent": f"BookClubDigitalLibrary/1.0 ({os.environ['MY_EMAIL']})"
-                },
-            ) as response:
+    # if not DEBUGING:
+    #     async with aiohttp.ClientSession() as session:
+    #         async with session.get(
+    #             API_URL,
+    #             headers={
+    #                 "User-Agent": f"BookClubDigitalLibrary/1.0 ({os.environ['MY_EMAIL']})"
+    #             },
+    #         ) as response:
 
-                print("Status:", response.status)
-                data = await response.json()
-                for kv, emoji in zip(data.items(), EMOJIES):
-                    for _, x in kv[1]["records"].items():
-                        books.append(Book(x["data"], x["details"]["details"], emoji=emoji))
+    #             print("Status:", response.status)
+    #             data = await response.json()
+    #             with open("a.json", "w", encoding="utf-8") as f:
+    #                 json.dump(data, f, ensure_ascii=False, indent=4)
+    #             for kv, emoji in zip(data.items(), EMOJIES):
+    #                 for _, x in kv[1]["records"].items():
+    #                     books.append(Book(x["data"], x["details"]["details"], emoji=emoji))
 
-    else:
-        with open("a.json", "r") as f:
-            payload = (json.load(f))["payload"]
+    # else:
+    #     with open("a.json", "r") as f:
+    #         payload = (json.load(f))["payload"]
 
-        for book in payload:
-            books.append(Book(book["data"], book["details"]["details"]))
+    #     for book in payload:
+    #         books.append(Book(book["data"], book["details"]["details"]))
+    
+    # async with AsyncSessionLocal() as session:
+    #     result = await session.execute(
+    #         Book.__table__.select()
+    #     )
+    #     results = result.fetchall()
+    #     for book in results:
+    #         books.append(Book())
 
-    patron_role = bot.get_guild(EC_SERVER_ID).get_role(PATRON_ROLE)
-    records = [msg.embeds[0] async for msg in (get_record_channel()).history()]
+
+    # patron_role = bot.get_guild(EC_SERVER_ID).get_role(PATRON_ROLE)
+    # records = [msg.embeds[0] async for msg in (get_record_channel()).history()]
         
+    
+    # async with AsyncSessionLocal() as session:
+    #     async with session.begin():
+    #         for book in books:
+    #             session.add(
+    #                 BookDB(
+    #                     identifiers=json.dumps(book.identifiers),
+    #                     url=book.url,
+    #                     emoji=book.emoji,
+    #                     publish_date=book.published,
+    #                     title=book.title,
+    #                     details=json.dumps(book.details), #Change to string
+    #                     publishers=json.dumps(book.publishers),
+    #                     authors=json.dumps(book.authors),
+    #                     cover=json.dumps(book.get_cover_url("small"))
+    #                 )
+    #             )
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(BookDB))
+        results = result.scalars().all()
+        for result in results:
+            books.append(Book(result))
+
     print(books)
     print("Successfuly fetched books!")
     print(f"Logged in as {bot.user}")

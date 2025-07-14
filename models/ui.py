@@ -42,6 +42,7 @@ class BookshelfDropdown(LibraryDropdown):
         _, available_book_isbns, _, _ = get_records_stats(
             interaction.client.get_channel(RECORD_CHANNEL_ID).topic
         )
+        img = book.get_cover_url("large")
         self.embed.clear_fields()
         self.embed.title = f"**{book.full_title}**"
         self.embed.url = book.url
@@ -55,14 +56,14 @@ class BookshelfDropdown(LibraryDropdown):
         ).add_field(name="Author", value=book.main_author).add_field(
             name="Available",
             value=(
-                "Yes" if book.identifiers.isbn_13[0] in available_book_isbns else "No"
+                "Yes" if book.available else "No"
             ),
         ).set_footer(
             text=book.publishers[0]
         ).set_thumbnail(
             url=book.get_author_image_url("large")
         ).set_image(
-            url=book.get_cover_url("large")
+            url=img
         )
         await interaction.response.edit_message(embed=self.embed)
 
