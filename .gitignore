@@ -176,3 +176,4 @@ cython_debug/
 #Additional items
 *.json
 invoice.png
+b.txt

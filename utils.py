@@ -1,15 +1,25 @@
 import datetime
-import discord
+import os
+import sys
+
+from discord.ext import commands
 from io import BytesIO
 from PIL import Image, ImageFont, ImageDraw
+from dotenv import load_dotenv
 from models.book import Book
 
 YELLOW = (255, 189, 89)
 COBALT = (0, 63, 148)
 LETTER_SPACING = 7
-RECORD_CHANNEL_ID = 1356093410414432256
-EC_SERVER_ID = 1254782055510839436
-PATRON_ROLE = 1356987062884237403
+
+load_dotenv()
+
+EC_SERVER_ID = int(os.environ["EC_SERVER_ID"])
+PATRON_ROLE = int(os.environ["PATRON_ROLE"])
+LIBRARIAN_ROLE = int(os.environ["LIBRARIAN_ROLE"])
+RECORD_CHANNEL_ID = int(os.environ["RECORD_CHANNEL_ID"])
+EXTENTIONS = ["jishaku"]
+TIMEFORMAT = "%d/%m" if sys.platform == "win32" else "%d/%-m"
 
 def is_book_available(book: Book, topic: str) -> bool:
     _, available_book_isbns, _, _ = get_records_stats(topic);

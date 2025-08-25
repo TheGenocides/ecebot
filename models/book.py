@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import json
 
 from dataclasses import dataclass
-from typing import Literal
-from db import BookDB
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models.db import BookDB
 
 @dataclass
 class Identifiers:
@@ -28,7 +32,11 @@ class Book:
 
     def __repr__(self):
         return self.title
-
+    
+    @property
+    def isbn(self):
+        return self.__payload.isbn
+    
     @classmethod
     def from_books(cls, isbn: str, books: list):  
         return [book for book in books if book.identifiers.isbn_13[0] == isbn][0]

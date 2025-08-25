@@ -1,7 +1,7 @@
 from .ui import (
     BookshelfDropdownView,
     BorrowingDropdownView,
-    PolicyAgreementView,
+    AgreementView,
     BorrowingForm,
 )
 from .book import Book

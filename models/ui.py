@@ -1,9 +1,7 @@
 import discord
-import random
 from discord import ui
 from models.book import Book
 from utils import RECORD_CHANNEL_ID, get_records_stats
-
 
 class LibraryDropdown(discord.ui.Select):
     def __init__(
@@ -37,11 +35,9 @@ class BookshelfDropdown(LibraryDropdown):
             )
 
         book = [
-            book for book in self.books if book.identifiers.isbn_13[0] == self.values[0]
+            book for book in self.books if book.isbn == self.values[0]
         ][0]
-        _, available_book_isbns, _, _ = get_records_stats(
-            interaction.client.get_channel(RECORD_CHANNEL_ID).topic
-        )
+        
         img = book.get_cover_url("large")
         self.embed.clear_fields()
         self.embed.title = f"**{book.full_title}**"
@@ -90,12 +86,14 @@ class BorrowingDropdownView(discord.ui.View):
         self.add_item(BorrowingDropdown(message, books, user))
 
 
-class PolicyAgreementView(discord.ui.View):
+class AgreementView(discord.ui.View):
+    positive = "Agree!"
+    negative = "Nevermind..."
     def __init__(self, user: discord.User):
         super().__init__()
         self.user = user
 
-    @discord.ui.button(label="Agree!", style=discord.ButtonStyle.green)
+    @discord.ui.button(label=positive, style=discord.ButtonStyle.green, custom_id="agree")
     async def confirm(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -105,7 +103,7 @@ class PolicyAgreementView(discord.ui.View):
             )
             return
 
-    @discord.ui.button(label="Nevermind", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label=negative, style=discord.ButtonStyle.danger, custom_id="disagree")
     async def abort(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user.id:
             await interaction.response.send_message(
@@ -114,7 +112,6 @@ class PolicyAgreementView(discord.ui.View):
             return
 
         await interaction.response.send_message("Okay we understand...", ephemeral=True)
-
 
 class BorrowingForm(ui.Modal, title="Borrowing Form"):
     name = ui.TextInput(label="Fullname", placeholder="Enter your fullname")
