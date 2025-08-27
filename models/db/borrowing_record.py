@@ -12,11 +12,12 @@ load_dotenv()
 
 BORROWED_DAYS = int(os.environ["Borrowed_DAYS"])
 
-class Status(str, PyEnum):
-    BORROWED    = "borrowed"
-    RETURNED    = "returned"
-    LATE        = "late"
-    PENDING     = "pending"
+class BorrowingStatus(str, PyEnum):
+    BORROWING       = "borrowing"
+    RETURNED        = "returned"
+    LATE            = "late"
+    PENDING         = "pending"
+    DENIED          = "denied"
     
 class BorrowingRecordDB(Base):
     __tablename__ = 'records'
@@ -26,18 +27,30 @@ class BorrowingRecordDB(Base):
     
     borrow_date = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
     due_date = Column(DateTime, nullable=False)
-    last_renewed_date = Column(DateTime, nullable=True)
+    # last_renewed_date = Column(DateTime, nullable=True)
     return_date = Column(DateTime, nullable=True)
     
-    status = Column(Enum(Status), default=Status.BORROWED)
+    status = Column(Enum(BorrowingStatus), default=BorrowingStatus.BORROWING)
     remarks = Column(Text, nullable=True)
 
     # user = relationship("User", back_populates="borrow_records")
     book = relationship("BookDB", back_populates="borrow_records")
 
     @staticmethod
+    async def approve_record_by_id(session, id):
+        record = await BorrowingRecordDB.get_by_id(session, id)
+        record.status = BorrowingStatus.BORROWING
+        await session.commit()
+
+    @staticmethod
+    async def disapprove_record_by_id(session, id):
+        record = await BorrowingRecordDB.get_by_id(session, id)
+        record.status = BorrowingStatus.DENIED
+        await session.commit()
+    
+    @staticmethod
     async def get_by_id(session, id):
-        return await session.execute(select(BorrowingRecordDB).where(BorrowingRecordDB.id == id))
+        return (await session.execute(select(BorrowingRecordDB).where(BorrowingRecordDB.id == id))).scalar()
     
     @staticmethod
     async def get_latest(session):
@@ -59,7 +72,7 @@ class BorrowingRecordDB(Base):
     @staticmethod
     async def user_is_borrowing(session, user_id):
         records = (await BorrowingRecordDB.get_all_by_patron(session, user_id))
-        if records and records[0].status == Status.BORROWED:
+        if records and records[0].status == BorrowingStatus.BORROWING:
             return True
         return False
     
@@ -70,7 +83,7 @@ class BorrowingRecordDB(Base):
             book_isbn=book_isbn,
             borrow_date=datetime.datetime.now(),
             due_date=datetime.datetime.now() + datetime.timedelta(days=BORROWED_DAYS),
-            status=Status.PENDING,
+            status=BorrowingStatus.PENDING,
             remarks=remarks
         )
         
@@ -82,6 +95,12 @@ class BorrowingRecordDB(Base):
     @staticmethod
     async def renew(session, id):
         record = await BorrowingRecordDB.get_by_id(session, id)
-        record.last_renewed_date = datetime.datetime.now()
         record.due_date = record.due_date + datetime.timedelta(days=BORROWED_DAYS)
+        await session.commit()
+
+    @staticmethod
+    async def finish(session, id):
+        record = await BorrowingRecordDB.get_by_id(session, id)
+        record.return_date = datetime.datetime.now()
+        record.status = BorrowingStatus.RETURNED
         await session.commit()

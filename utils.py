@@ -18,6 +18,7 @@ EC_SERVER_ID = int(os.environ["EC_SERVER_ID"])
 PATRON_ROLE = int(os.environ["PATRON_ROLE"])
 LIBRARIAN_ROLE = int(os.environ["LIBRARIAN_ROLE"])
 RECORD_CHANNEL_ID = int(os.environ["RECORD_CHANNEL_ID"])
+BOT_CHANNEL_ID = int(os.environ["BOT_CHANNEL_ID"])
 EXTENTIONS = ["jishaku"]
 TIMEFORMAT = "%d/%m" if sys.platform == "win32" else "%d/%-m"
 

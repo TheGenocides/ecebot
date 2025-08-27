@@ -9,7 +9,7 @@ import wmi
 from discord.ext import commands
 from googletrans import Translator
 from dotenv import load_dotenv
-from models.db import BorrowingRecordDB, BookDB, Status, AsyncSessionLocal, engine, Base
+from models.db import BorrowingRecordDB, BookDB, BorrowingStatus, AsyncSessionLocal, engine, Base
 from models import (
     Book,
     BookshelfDropdownView,
@@ -25,6 +25,7 @@ from utils import (
     LIBRARIAN_ROLE,
     PATRON_ROLE,
     EXTENTIONS,
+    BOT_CHANNEL_ID,
     build_receipt_image,
     build_renewed_receipt_image,
     build_returned_receipt_image,
@@ -41,6 +42,7 @@ books : list[Book] = []
 patron_role: discord.Role = None
 librarian_role: discord.Role = None
 record_channel: discord.TextChannel = None
+bot_channel: discord.TextChannel = None
 translator = Translator()
 
 w = wmi.WMI(namespace=r"root\OpenHardwareMonitor")
@@ -56,11 +58,12 @@ DEBUGING = False
 
 @bot.event
 async def on_ready():
-    global patron_role, librarian_role, records, record_channel
+    global patron_role, librarian_role, records, record_channel, bot_channel
 
     patron_role = bot.get_guild(EC_SERVER_ID).get_role(PATRON_ROLE)
     librarian_role = bot.get_guild(EC_SERVER_ID).get_role(LIBRARIAN_ROLE)
     record_channel = bot.get_channel(RECORD_CHANNEL_ID)
+    bot_channel = bot.get_channel(BOT_CHANNEL_ID)
     # records = [msg.embeds[0] async for msg in (record_channel).history()]
 
     for ext in EXTENTIONS:
@@ -230,23 +233,20 @@ async def borrow(ctx: commands.Context):
             attachments=[],
             view=None,
         )
-        await ctx.reply(
-            f"`( ╹ -╹)? Hmm?` *{book.full_title}*? " + random.choice(MESSAGE_SPLASH),
-            ephemeral=True,
-        )
+        
         await inter.response.send_modal(BorrowingForm(timeout=120, selected_book=book))
 
         inter: discord.Interaction = await bot.wait_for("interaction", check=modal_check)
         name = inter.data["components"][0]["components"][0]["value"]
         phone_number = inter.data["components"][1]["components"][0]["value"]
         renewed_date = datetime.datetime.now() + datetime.timedelta(days=7)
-        await inter.response.send_message("Please wait for the librarian's approvel", ephemeral=True)
+        await inter.response.send_message(f"`( ╹ -╹)? Hmm?` *{book.full_title}*? " + random.choice(MESSAGE_SPLASH), ephemeral=True)
 
         latest_record = await BorrowingRecordDB.get_latest(session)
 
         file = discord.File(
             build_receipt_image(
-                book, name, latest_record.id + 1, renewed_date.strftime("%d/%m" if sys.platform == "win32" else "%d/%-m")
+                book, name, (latest_record.id if latest_record else 0) + 1, renewed_date.strftime(TIMEFORMAT)
             ),
             "receipt.png",
         )
@@ -263,64 +263,121 @@ async def borrow(ctx: commands.Context):
             .set_image(url="attachment://receipt.png")
             .set_thumbnail(url=book.get_cover_url("large"))
         )
-        channel_msg = await channel.send(librarian_role.mention, embed=em, file=file, view=AgreementView(ctx.author))
-  
-        inter: discord.Interaction = await bot.wait_for(
-            "interaction", 
-            check=lambda inter: inter.message == channel_msg and librarian_role in inter.user.roles
-        )
-       
-        await channel_msg.edit(content="", view=None)
-        
-        if not inter.data.get("custom_id") == "agree":
-            return await msg.edit(
-            content=f"**`Denied`**\nI am so sorry {ctx.author.mention}\nI cannot approve your request, try asking our committe team for the full response!"
-        )
-        
+
         await BookDB.borrow(session, book.isbn)
-        new_record: BorrowingRecordDB = await BorrowingRecordDB.create(
+        await BorrowingRecordDB.create(
             session,
             int(ctx.author.id),
             book.isbn,
             f"{name}:{phone_number}"
         )
 
-        if not has_role:
-            await ctx.author.add_roles(
-                patron_role, reason="Borrowed their first ever book from the library!"
-            )
-
-        await ctx.author.send(
-            embed=em,
-            file = discord.File(
-                build_receipt_image(
-                    book, name, new_record.id, renewed_date.strftime(TIMEFORMAT)
-                ),
-                "receipt.png",
-            ),
-        )
-
+        await channel.send(librarian_role.mention, embed=em, file=file)
         await msg.edit(
-            content=f"**`[{step}/{last_step}, Approved]`** Done! `(,,> ᴗ <,,)`\nI've sent a copy of the receipt to your DM, show us your receipt in our library after school."
+            content=f"**`[{step}/{last_step}, Pending]`** Done! `(,,> ᴗ <,,)`\nYour request is being validated by us.\n**We will notify you shortly via DM**"
         )
+       
+
+@bot.command(aliases=["acc", "ac"])
+@commands.has_role(LIBRARIAN_ROLE)
+@commands.cooldown(1, 60, commands.BucketType.default)
+async def accept(ctx: commands.Context, receipt_id: int):
+    await ctx.send(f"Approving **{receipt_id}**? \n**(yes, no)**")
+    msg = await bot.wait_for("message", check=lambda msg: msg.content.lower() in ["yes", "no"] and msg.channel == ctx.channel and msg.author == ctx.author)
+    async with AsyncSessionLocal() as session:
+        record = await BorrowingRecordDB.get_by_id(session, receipt_id)
+        book = await BookDB.get_by_id(session, record.book_isbn, True)
+        name, phone_number = record.remarks.split(":")
+        
+        if not record or not record.status == BorrowingStatus.PENDING:
+            return await ctx.send("Record does not exist or cannot be approved!")
+        
+        file = discord.File(
+            build_receipt_image(
+                book, name, record.id, record.due_date.strftime(TIMEFORMAT)
+            ),
+            "receipt.png",
+        )
+
+        em = (
+            discord.Embed(
+                title=name,
+                description=f"**{ctx.author.mention}** has borrowed a book!\n\n{name} • {phone_number}",
+                color=discord.Color.yellow(),
+                timestamp=datetime.datetime.now(),
+            )
+            .set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+            .set_footer(text="Borrowed")
+            .set_image(url="attachment://receipt.png")
+            .set_thumbnail(url=book.get_cover_url("large"))
+        )
+        
+        match msg.content:
+            case "yes":
+                await (bot.get_guild(EC_SERVER_ID).get_member(record.user_id)).send(f"Hi! We have approved your request\n**Please come to Language Room (Ruang Bahasa) afterschool!**", embed=em, file=file)
+                await BorrowingRecordDB.approve_record_by_id(session, receipt_id)
+                return await ctx.send(f"Approved **{receipt_id}**!")
+            case "no":
+                return await ctx.send("Aborting...")
+            
+@bot.command(aliases=["den"])
+@commands.has_role(LIBRARIAN_ROLE)
+@commands.cooldown(1, 60, commands.BucketType.default)
+async def denied(ctx: commands.Context, receipt_id: int):
+    await ctx.send(f"Denying **{receipt_id}**? \n**(yes, no)**")
+    msg = await bot.wait_for("message", check=lambda msg: msg.content.lower() in ["yes", "no"] and msg.channel == ctx.channel and msg.author == ctx.author)
+
+    async with AsyncSessionLocal() as session:
+        record = await BorrowingRecordDB.get_by_id(session, receipt_id)
+
+        if not record or not record.status == BorrowingStatus.PENDING:
+            return await ctx.send("Record does not exist or cannot be denied!")
+        
+        match msg.content:
+            case "yes":
+                try:
+                    dm = await (bot.get_guild(EC_SERVER_ID).get_member(record.user_id)).create_dm()
+                except discord.Forbidden:
+                    await bot_channel.send(f"{ctx.author.mention} Your request has been approved! (I cannot send your a dm)\n**Please come to **Ruang Bahasa** afterschool!")
+                else:
+                    await dm.send("Your request has been denied: Please contact the @librarian or open a ticker for more information!")
+                await (bot.get_guild(EC_SERVER_ID).get_member(record.user_id)).send("")
+                await BookDB.borrow(session, record.book_isbn, True)
+                await BorrowingRecordDB.disapprove_record_by_id(session, int(receipt_id))
+                return await ctx.send(f"Denied **{receipt_id}**!")
+    
+            case "no":
+                return await ctx.send("Aborting...")
 
 
 @bot.command()
 @commands.has_role(LIBRARIAN_ROLE)
 async def renew(ctx: commands.Context, patron: discord.Member):
+    await ctx.send(f"Renewing for **{patron.mention}**? \n**(yes, no)**")
+    msg = await bot.wait_for("message", check=lambda msg: msg.content.lower() in ["yes", "no"] and msg.channel == ctx.channel and msg.author == ctx.author)
+
+    match msg.content:
+        case "yes":
+            pass
+        case "no":
+            return await ctx.send("Aborting...")
+        
     async with AsyncSessionLocal() as session:
         record = (await BorrowingRecordDB.get_all_by_patron(session, patron.id))[0]
-        if not records or not record.status == Status.BORROWED:
-            return await ctx.send("You have not borrowed any book!")
+    
+        if not record.status == BorrowingStatus.BORROWING:
+            return await ctx.send("They have not borrowed any book!")
         
+        await BorrowingRecordDB.renew(session, record.id)
+
         book = await BookDB.get_by_id(session, record.book_isbn, True)
         name, phone_number = record.remarks.split(":")
         file = discord.File(
             build_renewed_receipt_image(
                 book,
-                patron,
+                name,
                 record.id,
-                (datetime.datetime.now() + datetime.timedelta(days=7)).strftime(TIMEFORMAT),
+                (record.due_date).strftime(TIMEFORMAT),
             ),
             "renewed.png",
         )
@@ -331,131 +388,82 @@ async def renew(ctx: commands.Context, patron: discord.Member):
                 color=discord.Color.yellow(),
                 timestamp=record.borrow_date,
             )
-            .set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
-            .set_footer(text="Renewed by")
+            .set_author(name=patron.name, icon_url=patron.avatar.url)
+            .set_footer(text=f"Returned by {ctx.author.name}", icon_url=ctx.author.avatar.url)
             .set_image(url="attachment://renewed.png")
             .set_thumbnail(url=book.get_cover_url("large"))
         )
         await (record_channel).send(embed=em, file=file)
-        await ctx.send("`٩(>ᴗ<)و` I renewed your book!\nPlease come to the library to confirm your renewal after school and bring **the book**.\nThank you!")
+        await ctx.send(f"`٩(>ᴗ<)و` I renewed your book!\n{patron.mention} Please come to **Language Room** to confirm your renewal after school and bring **the book**.\nThank you!")
 
-        await BorrowingRecordDB.renew(session, record.id)
-        await ctx.send("OK")
+        file = discord.File(
+            build_renewed_receipt_image(
+                book,
+                name,
+                record.id,
+                (record.due_date).strftime(TIMEFORMAT),
+            ),
+            "renewed.png",
+        )
 
-    
-
-    # receipt = None
-    # book = None
-    # patron = None
-    # embed: discord.Embed = None
-
-    # for embed in records:
-    #     isbn, receipt_number, user_id = embed_title_parse(embed.title)
-    #     if ctx.author.id == int(user_id):
-    #         if embed.footer.text.lower() == "returned":
-    #             break
-    #         book = Book.from_books(isbn, books)
-    #         receipt = receipt_number
-    #         patron = (embed.description.split("\n\n")[1]).split(" •")[0]
-    #         day = embed.timestamp.day 
-            
-    #         if day < (day + 3):
-    #             return await ctx.send(f"Sorry there! You cannot renew your book until: <t:{round((embed.timestamp + datetime.timedelta(3)).timestamp())}:D>")
-            
-    # if not any([receipt, book, patron]):
-    #     return await ctx.send(
-    #         "Hmm sorry, but you haven't borrowed any book before :/\nBorrow one with the command `ec!borrow`!"
-    #     )
-    
-    # file = discord.File(
-    #     build_renewed_receipt_image(
-    #         book,
-    #         patron,
-    #         receipt,
-    #         (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%d/%-m"),
-    #     ),
-    #     "renewed.png",
-    # )
-    # em = (
-    #     discord.Embed(
-    #         title=embed.title,
-    #         description=embed.description.replace("borrowed", "renewed"),
-    #         color=discord.Color.yellow(),
-    #         timestamp=datetime.datetime.now(),
-    #     )
-    #     .set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
-    #     .set_footer(text="Renewed")
-    #     .set_image(url="attachment://renewed.png")
-    #     .set_thumbnail(url=book.get_cover_url("large"))
-    # )
-    # await (record_channel).send(embed=em, file=file)
-    # await ctx.send("`٩(>ᴗ<)و` I renewed your book!\nPlease come to the library to confirm your renewal after school and bring **the book**.\nThank you!")
+        await patron.send(embed=em, file=file)
 
 
 @bot.command(name="return")
 @commands.has_role(LIBRARIAN_ROLE)
 async def _return(ctx: commands.Context, patron: discord.Member): #What if the user does not go to the library for returning the book.
+    await ctx.send(f"Are they **{patron.mention}** done with the book? \n**(yes, no)**")
+    msg = await bot.wait_for("message", check=lambda msg: msg.content.lower() in ["yes", "no"] and msg.channel == ctx.channel and msg.author == ctx.author)
+
+    match msg.content:
+        case "yes":
+            pass
+        case "no":
+            return await ctx.send("Aborting.================================..")
+        
     async with AsyncSessionLocal() as session:
         record = (await BorrowingRecordDB.get_all_by_patron(session, patron.id))[0]
-        if not records or not record.status == Status.BORROWED:
-            await ctx.send("You have not borrowed any book!")
-        await ctx.send("OK")
-        
-    # receipt = None
-    # book = None
-    # patron = None
-    # for embed in records:
-    #     isbn, receipt_number, user_id = embed_title_parse(embed.title)
-    #     if ctx.author.id == int(user_id):
-    #         if embed.footer.text.lower() == "returned":
-    #             break
-
-    #         book = Book.from_books(isbn, books)
-    #         receipt = receipt_number
-    #         patron = (embed.description.split("\n\n")[1]).split(" •")[0]
-    #         day = embed.timestamp.day
-
-    #         if day < (day + 3):
-    #             return await ctx.send(f"Sorry there! You cannot return your book until: <t:{round((embed.timestamp + datetime.timedelta(3)).timestamp())}:D>")
-
-    # if not any([receipt, book, patron]):
-    #     return await ctx.send(
-    #         "Hmm sorry, but you haven't borrowed any book before :/\nBorrow one with the command `ec!borrow`!"
-    #     )
     
-    # receipt_number, available_book_isbns, borrowed_book_isbns, _ = get_records_stats(
-    #     record_channel.topic
-    # )
-    # channel = record_channel
-    # available_book_isbns.append(isbn)
-    # borrowed_book_isbns.remove(isbn)
-    # await channel.edit(
-    #     topic=f"Total Records: {receipt_number}\n\nAvailable: {(', '.join([isbn for isbn in available_book_isbns])).rstrip(', ')}\n\nBorrowed: {', '.join(borrowed_book_isbns) if borrowed_book_isbns else ''}"
-    # )
+        if not record.status == BorrowingStatus.BORROWING:
+            return await ctx.send("They have not borrowed any book!")
+        
+        book = await BookDB.get_by_id(session, record.book_isbn, True)
+        await BorrowingRecordDB.finish(session, record.id)
+        await BookDB.borrow(session, book.isbn, True)
+        name, phone_number = record.remarks.split(":")
+        file = discord.File(
+            build_returned_receipt_image(
+                book,
+                name,
+                record.id
+            ),
+            "returned.png",
+        )
+        em = (
+            discord.Embed(
+                title=name,
+                description=f"**{ctx.author.mention}** has returned a book!\n\n{name} • {phone_number}",
+                color=discord.Color.yellow(),
+                timestamp=record.borrow_date,
+            )
+            .set_author(name=patron.name, icon_url=patron.avatar.url)
+            .set_footer(text=f"Returned by {ctx.author.name}", icon_url=ctx.author.avatar.url)
+            .set_image(url="attachment://returned.png")
+            .set_thumbnail(url=book.get_cover_url("large"))
+        )
+        await (record_channel).send(embed=em, file=file)
+        await ctx.send(f"`(,,⟡o⟡,,)` _`Woah!`_ Finished? already?! `( ˶° ᗜ°)!!`\nThat was fast! I hope you like the book!\n{patron.mention} Please come and return the book at the library after school!")
 
-    # file = discord.File(
-    #     build_returned_receipt_image(
-    #         book,
-    #         patron,
-    #         receipt
-    #     ),
-    #     "returned.png",
-    # )
-    # em = (
-    #     discord.Embed(
-    #         title=embed.title,
-    #         description=embed.description.replace("borrowed", "returned").replace("renewed", "returned"),
-    #         color=discord.Color.yellow(),
-    #         timestamp=datetime.datetime.now(),
-    #     )
-    #     .set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
-    #     .set_footer(text="Returned")
-    #     .set_image(url="attachment://returned.png")
-    #     .set_thumbnail(url=book.get_cover_url("large"))
-    # )
+        file = discord.File(
+            build_returned_receipt_image(
+                book,
+                name,
+                record.id
+            ),
+            "returned.png",
+        )
 
-    # await channel.send(embed=em, file=file)
-    # await ctx.send("`(,,⟡o⟡,,)` _`Woah!`_ Finished? already?! `( ˶° ᗜ°)!!`\nThat was fast! I hope you like the book!\nPlease come and return the book at the library after school!")
+        await patron.send(embed=em, file=file)
 
 os.environ["JISHAKU_NO_UNDERSCORE"] = "true"
 os.environ["JISHAKU_RETAIN"] = "true"

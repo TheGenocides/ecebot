@@ -45,11 +45,11 @@ class BookDB(Base):
         return books
 
     @staticmethod
-    async def borrow(session, isbn):
+    async def borrow(session, isbn, reverse: bool = False):
         book: BookDB = await BookDB.get_by_id(session, isbn, False)
 
         if book:
-            book.available = 0
+            book.available = 0 + reverse
             await session.commit()
             return True
         return False

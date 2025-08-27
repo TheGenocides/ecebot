@@ -3,7 +3,7 @@ from .book import (
 )
 
 from .borrowing_record import (
-    BorrowingRecordDB, Status
+    BorrowingRecordDB, BorrowingStatus
 )
 
 from .db import AsyncSessionLocal, engine, Base
